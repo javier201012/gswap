@@ -67,6 +67,7 @@ function App() {
   const [recipient, setRecipient] = useState('')
   const [amount, setAmount] = useState('')
   const [isSending, setIsSending] = useState(false)
+  const [isRefreshingBalances, setIsRefreshingBalances] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [history, setHistory] = useState([])
@@ -115,24 +116,34 @@ function App() {
   async function refreshBalances(nextAccount) {
     if (!publicClient || !nextAccount) return
 
-    const nextBalances = {}
-    for (const token of tokens) {
-      if (token.type === 'native') {
-        const value = await publicClient.getBalance({ address: nextAccount })
-        nextBalances[token.symbol] = formatEther(value)
-        continue
+    setIsRefreshingBalances(true)
+
+    try {
+      const nextBalances = {}
+      for (const token of tokens) {
+        try {
+          if (token.type === 'native') {
+            const value = await publicClient.getBalance({ address: nextAccount })
+            nextBalances[token.symbol] = formatEther(value)
+            continue
+          }
+
+          const value = await publicClient.readContract({
+            address: token.address,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [nextAccount],
+          })
+          nextBalances[token.symbol] = formatUnits(value, token.decimals)
+        } catch {
+          nextBalances[token.symbol] = '0'
+        }
       }
 
-      const value = await publicClient.readContract({
-        address: token.address,
-        abi: erc20Abi,
-        functionName: 'balanceOf',
-        args: [nextAccount],
-      })
-      nextBalances[token.symbol] = formatUnits(value, token.decimals)
+      setBalances(nextBalances)
+    } finally {
+      setIsRefreshingBalances(false)
     }
-
-    setBalances(nextBalances)
   }
 
   async function switchToChain(nextChainId) {
@@ -250,7 +261,7 @@ function App() {
     }
 
     refreshBalances(address)
-  }, [address, isConnected, chainId, publicClient, selectedTokenSymbol, currentChain.id])
+  }, [address, isConnected, chainId, publicClient, currentChain.id])
 
   useEffect(() => {
     if (!tokens.some((token) => token.symbol === selectedTokenSymbol)) {
@@ -273,6 +284,10 @@ function App() {
             <article className="metric-card">
               <span>Network</span>
               <strong>{chainId ? currentChain.name : '—'}</strong>
+            </article>
+            <article className="metric-card">
+              <span>Estado saldos</span>
+              <strong>{isRefreshingBalances ? 'Actualizando...' : 'Sincronizado'}</strong>
             </article>
           </div>
         </div>
@@ -315,6 +330,16 @@ function App() {
           <div className="section-head">
             <h2>Balances</h2>
             <small>{address ? 'Actualizados desde wallet conectada' : 'Conecta tu wallet para ver saldos'}</small>
+          </div>
+          <div className="balances-actions">
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={!address || isRefreshingBalances}
+              onClick={() => refreshBalances(address)}
+            >
+              {isRefreshingBalances ? 'Actualizando...' : 'Actualizar saldos'}
+            </button>
           </div>
           <div className="token-grid">
             {tokens.map((token) => (

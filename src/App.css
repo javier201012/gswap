@@ -130,6 +130,10 @@ h1 {
   font-size: 0.78rem;
 }
 
+.balances-actions {
+  margin-bottom: 0.7rem;
+}
+
 .history-table-wrap {
   overflow-x: auto;
 }

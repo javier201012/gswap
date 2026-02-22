@@ -134,6 +134,28 @@ h1 {
   margin-bottom: 0.7rem;
 }
 
+.custom-token-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+
+.custom-token-row input {
+  width: 100%;
+  border-radius: 11px;
+  border: 1px solid rgba(88, 108, 156, 0.42);
+  background: rgba(11, 15, 26, 0.95);
+  color: #ffffff;
+  padding: 0.68rem 0.78rem;
+  outline: none;
+}
+
+.custom-token-row input:focus {
+  border-color: #6e8bff;
+  box-shadow: 0 0 0 3px rgba(110, 139, 255, 0.18);
+}
+
 .history-table-wrap {
   overflow-x: auto;
 }

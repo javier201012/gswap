@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
-import { useAccount, useChainId, useConnections, useDisconnect, usePublicClient, useSwitchChain, useWalletClient } from 'wagmi'
+import { useAccount, useChainId, useConnections, useDisconnect, usePublicClient, useWalletClient } from 'wagmi'
 import { arbitrum, bsc, polygon } from 'wagmi/chains'
 import { erc20Abi, formatEther, formatUnits, isAddress, parseEther, parseUnits } from 'viem'
 import './App.css'
 
 const HISTORY_STORAGE_KEY = 'gswap_tx_history'
+const CUSTOM_TOKENS_STORAGE_KEY = 'gswap_custom_tokens_by_chain'
 const SUPPORTED_CHAINS = [bsc, polygon, arbitrum]
 const DEFAULT_CHAIN = bsc
 
-const TOKENS_BY_CHAIN = {
+const DEFAULT_TOKENS_BY_CHAIN = {
   [bsc.id]: [
     { symbol: 'BNB', type: 'native', decimals: 18 },
     { symbol: 'USDT', type: 'erc20', decimals: 18, address: '0x55d398326f99059fF775485246999027B3197955' },
@@ -49,6 +50,25 @@ function formatBalance(balance) {
   return numeric.toFixed(4)
 }
 
+function mergeTokens(defaultTokens, customTokens) {
+  const merged = [...defaultTokens]
+  const known = new Set(
+    defaultTokens
+      .filter((token) => token.address)
+      .map((token) => `${token.symbol}:${token.address.toLowerCase()}`),
+  )
+
+  for (const token of customTokens) {
+    if (!token?.address) continue
+    const key = `${token.symbol}:${token.address.toLowerCase()}`
+    if (known.has(key)) continue
+    known.add(key)
+    merged.push(token)
+  }
+
+  return merged
+}
+
 function App() {
   const { address, isConnected } = useAccount()
   const connections = useConnections()
@@ -60,10 +80,12 @@ function App() {
   )
   const publicClient = usePublicClient({ chainId: currentChain.id })
   const { data: walletClient } = useWalletClient()
-  const { switchChainAsync } = useSwitchChain()
 
   const [balances, setBalances] = useState({})
+  const [customTokensByChain, setCustomTokensByChain] = useState({})
   const [selectedTokenSymbol, setSelectedTokenSymbol] = useState('BNB')
+  const [customTokenAddress, setCustomTokenAddress] = useState('')
+  const [isAddingToken, setIsAddingToken] = useState(false)
   const [recipient, setRecipient] = useState('')
   const [amount, setAmount] = useState('')
   const [isSending, setIsSending] = useState(false)
@@ -72,7 +94,11 @@ function App() {
   const [success, setSuccess] = useState('')
   const [history, setHistory] = useState([])
 
-  const tokens = useMemo(() => TOKENS_BY_CHAIN[currentChain.id] ?? TOKENS_BY_CHAIN[DEFAULT_CHAIN.id], [currentChain.id])
+  const tokens = useMemo(() => {
+    const defaults = DEFAULT_TOKENS_BY_CHAIN[currentChain.id] ?? DEFAULT_TOKENS_BY_CHAIN[DEFAULT_CHAIN.id]
+    const custom = customTokensByChain[currentChain.id] ?? []
+    return mergeTokens(defaults, custom)
+  }, [currentChain.id, customTokensByChain])
 
   const selectedToken = useMemo(
     () => tokens.find((token) => token.symbol === selectedTokenSymbol) ?? tokens[0],
@@ -80,12 +106,6 @@ function App() {
   )
 
   const isSupportedNetwork = SUPPORTED_CHAINS.some((chain) => chain.id === chainId)
-
-  function refreshPageAfterAction(delay = 500) {
-    window.setTimeout(() => {
-      window.location.reload()
-    }, delay)
-  }
 
   async function handleDisconnect() {
     setError('')
@@ -107,9 +127,82 @@ function App() {
       setRecipient('')
       setAmount('')
       setSuccess('Wallet desconectada correctamente.')
-      refreshPageAfterAction()
     } catch {
       setError('No se pudo desconectar la wallet. Intenta nuevamente.')
+    }
+  }
+
+  function saveCustomTokens(nextValue) {
+    setCustomTokensByChain(nextValue)
+    localStorage.setItem(CUSTOM_TOKENS_STORAGE_KEY, JSON.stringify(nextValue))
+  }
+
+  async function addCustomToken() {
+    setError('')
+    setSuccess('')
+
+    if (!isSupportedNetwork) {
+      setError('Primero cambia a una red soportada para agregar tokens.')
+      return
+    }
+
+    if (!publicClient) {
+      setError('No hay conexión RPC activa para leer el token.')
+      return
+    }
+
+    if (!isAddress(customTokenAddress)) {
+      setError('Dirección de contrato inválida.')
+      return
+    }
+
+    const normalizedAddress = customTokenAddress.toLowerCase()
+    const alreadyExists = tokens.some((token) => token.address?.toLowerCase() === normalizedAddress)
+    if (alreadyExists) {
+      setError('Ese token ya está en la lista de esta red.')
+      return
+    }
+
+    setIsAddingToken(true)
+
+    try {
+      const [symbol, decimals] = await Promise.all([
+        publicClient.readContract({
+          address: customTokenAddress,
+          abi: erc20Abi,
+          functionName: 'symbol',
+        }),
+        publicClient.readContract({
+          address: customTokenAddress,
+          abi: erc20Abi,
+          functionName: 'decimals',
+        }),
+      ])
+
+      const nextToken = {
+        symbol,
+        type: 'erc20',
+        decimals: Number(decimals),
+        address: customTokenAddress,
+      }
+
+      const chainKey = String(currentChain.id)
+      const nextCustomByChain = {
+        ...customTokensByChain,
+        [chainKey]: [...(customTokensByChain[chainKey] ?? []), nextToken],
+      }
+
+      saveCustomTokens(nextCustomByChain)
+      setCustomTokenAddress('')
+      setSuccess(`Token ${symbol} agregado correctamente.`)
+
+      if (address) {
+        await refreshBalances(address)
+      }
+    } catch {
+      setError('No se pudo leer el token. Verifica que el contrato sea ERC20 en esta red.')
+    } finally {
+      setIsAddingToken(false)
     }
   }
 
@@ -143,18 +236,6 @@ function App() {
       setBalances(nextBalances)
     } finally {
       setIsRefreshingBalances(false)
-    }
-  }
-
-  async function switchToChain(nextChainId) {
-    try {
-      const chain = SUPPORTED_CHAINS.find((item) => item.id === nextChainId)
-      if (!chain) return
-      await switchChainAsync({ chainId: nextChainId })
-      setSuccess(`Red cambiada a ${chain.name}.`)
-      refreshPageAfterAction()
-    } catch {
-      setError('No se pudo cambiar de red.')
     }
   }
 
@@ -233,7 +314,6 @@ function App() {
       setSuccess(`Transferencia enviada: ${txHash}`)
       setAmount('')
       setRecipient('')
-      refreshPageAfterAction()
     } catch {
       setError('La transacción falló o fue rechazada.')
     } finally {
@@ -251,6 +331,19 @@ function App() {
       }
     } catch {
       setHistory([])
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      const savedCustomTokens = localStorage.getItem(CUSTOM_TOKENS_STORAGE_KEY)
+      if (!savedCustomTokens) return
+      const parsed = JSON.parse(savedCustomTokens)
+      if (parsed && typeof parsed === 'object') {
+        setCustomTokensByChain(parsed)
+      }
+    } catch {
+      setCustomTokensByChain({})
     }
   }, [])
 
@@ -307,21 +400,11 @@ function App() {
           <span>
             Estado de red:{' '}
             <strong>
-              {isSupportedNetwork ? `Lista para operar en ${currentChain.name}` : 'Cambia a BSC, Polygon o Arbitrum'}
+              {isSupportedNetwork
+                ? `Lista para operar en ${currentChain.name}`
+                : 'Cambia de red desde tu wallet (BSC, Polygon o Arbitrum)'}
             </strong>
           </span>
-        </div>
-        <div className="chain-actions">
-          {SUPPORTED_CHAINS.map((chain) => (
-            <button
-              key={chain.id}
-              type="button"
-              className={`secondary-button ${chainId === chain.id ? 'chain-active' : ''}`}
-              onClick={() => switchToChain(chain.id)}
-            >
-              {chain.name}
-            </button>
-          ))}
         </div>
       </section>
 
@@ -339,6 +422,22 @@ function App() {
               onClick={() => refreshBalances(address)}
             >
               {isRefreshingBalances ? 'Actualizando...' : 'Actualizar saldos'}
+            </button>
+          </div>
+          <div className="custom-token-row">
+            <input
+              type="text"
+              value={customTokenAddress}
+              onChange={(event) => setCustomTokenAddress(event.target.value)}
+              placeholder="Contrato ERC20 (0x...)"
+            />
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={addCustomToken}
+              disabled={isAddingToken || !customTokenAddress}
+            >
+              {isAddingToken ? 'Agregando...' : 'Agregar token'}
             </button>
           </div>
           <div className="token-grid">

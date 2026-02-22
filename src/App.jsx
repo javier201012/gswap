@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount, useChainId, useConnections, useDisconnect, usePublicClient, useWalletClient } from 'wagmi'
 import { arbitrum, bsc, polygon } from 'wagmi/chains'
@@ -20,13 +20,15 @@ const DEFAULT_TOKENS_BY_CHAIN = {
   [polygon.id]: [
     { symbol: 'MATIC', type: 'native', decimals: 18 },
     { symbol: 'USDT', type: 'erc20', decimals: 6, address: '0xc2132D05D31c914a87C6611C10748AaCbC532DaE' },
-    { symbol: 'USDC', type: 'erc20', decimals: 6, address: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174' },
+    { symbol: 'USDC', type: 'erc20', decimals: 6, address: '0x3c499c542cef5E3811e1192ce70d8cc03d5c3359' },
+    { symbol: 'USDC.e', type: 'erc20', decimals: 6, address: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174' },
     { symbol: 'DAI', type: 'erc20', decimals: 18, address: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063' },
   ],
   [arbitrum.id]: [
     { symbol: 'ETH', type: 'native', decimals: 18 },
     { symbol: 'USDT', type: 'erc20', decimals: 6, address: '0xFd086bC7CD5C481DCC9C85ebe478A1C0b69FCbb9' },
     { symbol: 'USDC', type: 'erc20', decimals: 6, address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' },
+    { symbol: 'USDC.e', type: 'erc20', decimals: 6, address: '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8' },
     { symbol: 'DAI', type: 'erc20', decimals: 18, address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1' },
   ],
 }
@@ -57,20 +59,25 @@ function sleep(ms) {
   })
 }
 
+function tokenKey(token) {
+  if (token.type === 'native') return `native:${token.symbol}`
+  return `erc20:${token.address.toLowerCase()}`
+}
+
 function mergeTokens(defaultTokens, customTokens) {
-  const merged = [...defaultTokens]
+  const merged = defaultTokens.map((token) => ({ ...token, isCustom: false }))
   const known = new Set(
-    defaultTokens
+    merged
       .filter((token) => token.address)
-      .map((token) => `${token.symbol}:${token.address.toLowerCase()}`),
+      .map((token) => token.address.toLowerCase()),
   )
 
   for (const token of customTokens) {
     if (!token?.address) continue
-    const key = `${token.symbol}:${token.address.toLowerCase()}`
+    const key = token.address.toLowerCase()
     if (known.has(key)) continue
     known.add(key)
-    merged.push(token)
+    merged.push({ ...token, isCustom: true })
   }
 
   return merged
@@ -90,7 +97,7 @@ function App() {
 
   const [balances, setBalances] = useState({})
   const [customTokensByChain, setCustomTokensByChain] = useState({})
-  const [selectedTokenSymbol, setSelectedTokenSymbol] = useState('BNB')
+  const [selectedTokenKey, setSelectedTokenKey] = useState('native:BNB')
   const [customTokenAddress, setCustomTokenAddress] = useState('')
   const [isAddingToken, setIsAddingToken] = useState(false)
   const [recipient, setRecipient] = useState('')
@@ -100,6 +107,7 @@ function App() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [history, setHistory] = useState([])
+  const previousChainIdRef = useRef(chainId)
 
   const tokens = useMemo(() => {
     const defaults = DEFAULT_TOKENS_BY_CHAIN[currentChain.id] ?? DEFAULT_TOKENS_BY_CHAIN[DEFAULT_CHAIN.id]
@@ -108,8 +116,8 @@ function App() {
   }, [currentChain.id, customTokensByChain])
 
   const selectedToken = useMemo(
-    () => tokens.find((token) => token.symbol === selectedTokenSymbol) ?? tokens[0],
-    [selectedTokenSymbol, tokens],
+    () => tokens.find((token) => tokenKey(token) === selectedTokenKey) ?? tokens[0],
+    [selectedTokenKey, tokens],
   )
 
   const isSupportedNetwork = SUPPORTED_CHAINS.some((chain) => chain.id === chainId)
@@ -142,6 +150,19 @@ function App() {
   function saveCustomTokens(nextValue) {
     setCustomTokensByChain(nextValue)
     localStorage.setItem(CUSTOM_TOKENS_STORAGE_KEY, JSON.stringify(nextValue))
+  }
+
+  function removeCustomToken(tokenAddress) {
+    const chainKey = String(currentChain.id)
+    const currentCustom = customTokensByChain[chainKey] ?? []
+    const filtered = currentCustom.filter((token) => token.address.toLowerCase() !== tokenAddress.toLowerCase())
+    const nextCustomByChain = {
+      ...customTokensByChain,
+      [chainKey]: filtered,
+    }
+
+    saveCustomTokens(nextCustomByChain)
+    setSuccess('Token eliminado de la lista personalizada.')
   }
 
   async function addCustomToken() {
@@ -222,9 +243,10 @@ function App() {
       const nextBalances = {}
       for (const token of tokens) {
         try {
+          const key = tokenKey(token)
           if (token.type === 'native') {
             const value = await publicClient.getBalance({ address: nextAccount })
-            nextBalances[token.symbol] = formatEther(value)
+            nextBalances[key] = formatEther(value)
             continue
           }
 
@@ -246,9 +268,9 @@ function App() {
             })
           }
 
-          nextBalances[token.symbol] = formatUnits(value, token.decimals)
+          nextBalances[key] = formatUnits(value, token.decimals)
         } catch {
-          nextBalances[token.symbol] = null
+          nextBalances[key] = null
         }
       }
 
@@ -285,6 +307,11 @@ function App() {
 
     if (!amount || Number(amount) <= 0) {
       setError('Ingresa un monto válido.')
+      return
+    }
+
+    if (!selectedToken) {
+      setError('Selecciona un token válido.')
       return
     }
 
@@ -367,6 +394,18 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!chainId) return
+
+    if (previousChainIdRef.current && previousChainIdRef.current !== chainId) {
+      setCustomTokensByChain({})
+      localStorage.removeItem(CUSTOM_TOKENS_STORAGE_KEY)
+      setSuccess('Se eliminaron los tokens añadidos al cambiar de red.')
+    }
+
+    previousChainIdRef.current = chainId
+  }, [chainId])
+
+  useEffect(() => {
     if (!isConnected || !address) {
       setBalances({})
       return
@@ -376,10 +415,10 @@ function App() {
   }, [address, isConnected, chainId, publicClient, currentChain.id])
 
   useEffect(() => {
-    if (!tokens.some((token) => token.symbol === selectedTokenSymbol)) {
-      setSelectedTokenSymbol(tokens[0].symbol)
+    if (!tokens.some((token) => tokenKey(token) === selectedTokenKey)) {
+      setSelectedTokenKey(tokenKey(tokens[0]))
     }
-  }, [tokens, selectedTokenSymbol])
+  }, [tokens, selectedTokenKey])
 
   return (
     <main className="app">
@@ -404,7 +443,7 @@ function App() {
           </div>
         </div>
         <div className="wallet-actions">
-          <ConnectButton label="Conectar Wallet" chainStatus="name" showBalance={false} accountStatus="address" />
+          <ConnectButton label="Conectar Wallet" chainStatus="none" showBalance={false} accountStatus="address" />
           {isConnected ? (
             <button type="button" className="secondary-button disconnect-button" onClick={handleDisconnect}>
               Desconectar Wallet
@@ -462,12 +501,24 @@ function App() {
           <div className="token-grid">
             {tokens.map((token) => (
               <article
-                key={token.symbol}
-                className={`token-card ${selectedTokenSymbol === token.symbol ? 'active' : ''}`}
-                onClick={() => setSelectedTokenSymbol(token.symbol)}
+                key={tokenKey(token)}
+                className={`token-card ${selectedTokenKey === tokenKey(token) ? 'active' : ''}`}
+                onClick={() => setSelectedTokenKey(tokenKey(token))}
               >
                 <p>{token.symbol}</p>
-                <strong>{address ? formatBalance(balances[token.symbol]) : '—'}</strong>
+                <strong>{address ? formatBalance(balances[tokenKey(token)]) : '—'}</strong>
+                {token.isCustom ? (
+                  <button
+                    type="button"
+                    className="token-remove"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      removeCustomToken(token.address)
+                    }}
+                  >
+                    Eliminar
+                  </button>
+                ) : null}
               </article>
             ))}
           </div>
@@ -481,9 +532,9 @@ function App() {
           <form className="transfer-form" onSubmit={sendTransfer}>
             <label>
               Token
-              <select value={selectedTokenSymbol} onChange={(event) => setSelectedTokenSymbol(event.target.value)}>
+              <select value={selectedTokenKey} onChange={(event) => setSelectedTokenKey(event.target.value)}>
                 {tokens.map((token) => (
-                  <option key={token.symbol} value={token.symbol}>
+                  <option key={tokenKey(token)} value={tokenKey(token)}>
                     {token.symbol}
                   </option>
                 ))}

@@ -240,6 +240,21 @@ h1 {
   font-size: 1.05rem;
 }
 
+.token-remove {
+  margin-top: 0.5rem;
+  border: 1px solid rgba(255, 138, 164, 0.45);
+  background: rgba(66, 22, 36, 0.45);
+  color: #ffd8e2;
+  border-radius: 8px;
+  padding: 0.28rem 0.5rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.token-remove:hover {
+  filter: brightness(1.08);
+}
+
 .token-card:hover {
   transform: translateY(-2px);
   border-color: rgba(114, 138, 255, 0.5);

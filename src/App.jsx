@@ -1,19 +1,40 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount, useChainId, useConnections, useDisconnect, usePublicClient, useSwitchChain, useWalletClient } from 'wagmi'
-import { bsc } from 'wagmi/chains'
+import { arbitrum, bsc, polygon } from 'wagmi/chains'
 import { erc20Abi, formatEther, formatUnits, isAddress, parseEther, parseUnits } from 'viem'
 import './App.css'
 
-const BSC_CHAIN_ID = 56
 const HISTORY_STORAGE_KEY = 'gswap_tx_history'
+const SUPPORTED_CHAINS = [bsc, polygon, arbitrum]
+const DEFAULT_CHAIN = bsc
 
-const TOKENS = [
-  { symbol: 'BNB', type: 'native', decimals: 18 },
-  { symbol: 'USDT', type: 'erc20', decimals: 18, address: '0x55d398326f99059fF775485246999027B3197955' },
-  { symbol: 'USDC', type: 'erc20', decimals: 18, address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d' },
-  { symbol: 'BUSD', type: 'erc20', decimals: 18, address: '0xe9e7cea3dedca5984780bafc599bd69add087d56' },
-]
+const TOKENS_BY_CHAIN = {
+  [bsc.id]: [
+    { symbol: 'BNB', type: 'native', decimals: 18 },
+    { symbol: 'USDT', type: 'erc20', decimals: 18, address: '0x55d398326f99059fF775485246999027B3197955' },
+    { symbol: 'USDC', type: 'erc20', decimals: 18, address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d' },
+    { symbol: 'BUSD', type: 'erc20', decimals: 18, address: '0xe9e7cea3dedca5984780bafc599bd69add087d56' },
+  ],
+  [polygon.id]: [
+    { symbol: 'MATIC', type: 'native', decimals: 18 },
+    { symbol: 'USDT', type: 'erc20', decimals: 6, address: '0xc2132D05D31c914a87C6611C10748AaCbC532DaE' },
+    { symbol: 'USDC', type: 'erc20', decimals: 6, address: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174' },
+    { symbol: 'DAI', type: 'erc20', decimals: 18, address: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063' },
+  ],
+  [arbitrum.id]: [
+    { symbol: 'ETH', type: 'native', decimals: 18 },
+    { symbol: 'USDT', type: 'erc20', decimals: 6, address: '0xFd086bC7CD5C481DCC9C85ebe478A1C0b69FCbb9' },
+    { symbol: 'USDC', type: 'erc20', decimals: 6, address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' },
+    { symbol: 'DAI', type: 'erc20', decimals: 18, address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1' },
+  ],
+}
+
+const EXPLORER_BY_CHAIN = {
+  [bsc.id]: 'https://bscscan.com/tx/',
+  [polygon.id]: 'https://polygonscan.com/tx/',
+  [arbitrum.id]: 'https://arbiscan.io/tx/',
+}
 
 function shortAddress(address) {
   if (!address) return ''
@@ -33,7 +54,11 @@ function App() {
   const connections = useConnections()
   const { disconnect } = useDisconnect()
   const chainId = useChainId()
-  const publicClient = usePublicClient({ chainId: bsc.id })
+  const currentChain = useMemo(
+    () => SUPPORTED_CHAINS.find((chain) => chain.id === chainId) ?? DEFAULT_CHAIN,
+    [chainId],
+  )
+  const publicClient = usePublicClient({ chainId: currentChain.id })
   const { data: walletClient } = useWalletClient()
   const { switchChainAsync } = useSwitchChain()
 
@@ -46,12 +71,14 @@ function App() {
   const [success, setSuccess] = useState('')
   const [history, setHistory] = useState([])
 
+  const tokens = useMemo(() => TOKENS_BY_CHAIN[currentChain.id] ?? TOKENS_BY_CHAIN[DEFAULT_CHAIN.id], [currentChain.id])
+
   const selectedToken = useMemo(
-    () => TOKENS.find((token) => token.symbol === selectedTokenSymbol) ?? TOKENS[0],
-    [selectedTokenSymbol],
+    () => tokens.find((token) => token.symbol === selectedTokenSymbol) ?? tokens[0],
+    [selectedTokenSymbol, tokens],
   )
 
-  const isBscNetwork = chainId === BSC_CHAIN_ID
+  const isSupportedNetwork = SUPPORTED_CHAINS.some((chain) => chain.id === chainId)
 
   function refreshPageAfterAction(delay = 500) {
     window.setTimeout(() => {
@@ -89,7 +116,7 @@ function App() {
     if (!publicClient || !nextAccount) return
 
     const nextBalances = {}
-    for (const token of TOKENS) {
+    for (const token of tokens) {
       if (token.type === 'native') {
         const value = await publicClient.getBalance({ address: nextAccount })
         nextBalances[token.symbol] = formatEther(value)
@@ -108,10 +135,12 @@ function App() {
     setBalances(nextBalances)
   }
 
-  async function switchToBsc() {
+  async function switchToChain(nextChainId) {
     try {
-      await switchChainAsync({ chainId: bsc.id })
-      setSuccess('Red cambiada a Binance Smart Chain.')
+      const chain = SUPPORTED_CHAINS.find((item) => item.id === nextChainId)
+      if (!chain) return
+      await switchChainAsync({ chainId: nextChainId })
+      setSuccess(`Red cambiada a ${chain.name}.`)
       refreshPageAfterAction()
     } catch {
       setError('No se pudo cambiar de red.')
@@ -128,8 +157,8 @@ function App() {
       return
     }
 
-    if (!isBscNetwork) {
-      setError('Debes estar en Binance Smart Chain (BSC).')
+    if (!isSupportedNetwork) {
+      setError('Red no soportada. Usa BSC, Polygon o Arbitrum.')
       return
     }
 
@@ -158,7 +187,7 @@ function App() {
           account: address,
           to: recipient,
           value: parseEther(amount),
-          chain: bsc,
+          chain: currentChain,
         })
       } else {
         txHash = await walletClient.writeContract({
@@ -167,7 +196,7 @@ function App() {
           abi: erc20Abi,
           functionName: 'transfer',
           args: [recipient, parseUnits(amount, selectedToken.decimals)],
-          chain: bsc,
+          chain: currentChain,
         })
       }
 
@@ -177,6 +206,8 @@ function App() {
       const historyItem = {
         date: new Date().toISOString(),
         amount,
+        token: selectedToken.symbol,
+        chainId: currentChain.id,
         from: address,
         to: recipient,
         hash: txHash,
@@ -219,15 +250,21 @@ function App() {
     }
 
     refreshBalances(address)
-  }, [address, isConnected, chainId, publicClient])
+  }, [address, isConnected, chainId, publicClient, selectedTokenSymbol, currentChain.id])
+
+  useEffect(() => {
+    if (!tokens.some((token) => token.symbol === selectedTokenSymbol)) {
+      setSelectedTokenSymbol(tokens[0].symbol)
+    }
+  }, [tokens, selectedTokenSymbol])
 
   return (
     <main className="app">
       <header className="header">
         <div className="header-main">
-          <p className="badge">BSC / Rabby</p>
+          <p className="badge">BSC / Polygon / Arbitrum</p>
           <h1>gswap</h1>
-          <p className="subtitle">Portal Web3 para gestionar y enviar activos en Binance Smart Chain.</p>
+          <p className="subtitle">Portal Web3 para gestionar y enviar activos en redes EVM soportadas.</p>
           <div className="header-metrics">
             <article className="metric-card">
               <span>Wallet</span>
@@ -235,7 +272,7 @@ function App() {
             </article>
             <article className="metric-card">
               <span>Network</span>
-              <strong>{isBscNetwork ? 'Binance Smart Chain' : chainId ? `Chain ${chainId}` : '—'}</strong>
+              <strong>{chainId ? currentChain.name : '—'}</strong>
             </article>
           </div>
         </div>
@@ -251,17 +288,26 @@ function App() {
 
       <section className="panel status-panel">
         <div className="status-row">
-          <span className={`status-dot ${isBscNetwork ? 'ok' : 'warn'}`} />
+          <span className={`status-dot ${isSupportedNetwork ? 'ok' : 'warn'}`} />
           <span>
             Estado de red:{' '}
-            <strong>{isBscNetwork ? 'Lista para operar en BSC' : 'Conecta o cambia a Binance Smart Chain'}</strong>
+            <strong>
+              {isSupportedNetwork ? `Lista para operar en ${currentChain.name}` : 'Cambia a BSC, Polygon o Arbitrum'}
+            </strong>
           </span>
         </div>
-        {isConnected && !isBscNetwork ? (
-          <button type="button" className="secondary-button" onClick={switchToBsc}>
-            Cambiar a BSC
-          </button>
-        ) : null}
+        <div className="chain-actions">
+          {SUPPORTED_CHAINS.map((chain) => (
+            <button
+              key={chain.id}
+              type="button"
+              className={`secondary-button ${chainId === chain.id ? 'chain-active' : ''}`}
+              onClick={() => switchToChain(chain.id)}
+            >
+              {chain.name}
+            </button>
+          ))}
+        </div>
       </section>
 
       <section className="dashboard-grid">
@@ -271,7 +317,7 @@ function App() {
             <small>{address ? 'Actualizados desde wallet conectada' : 'Conecta tu wallet para ver saldos'}</small>
           </div>
           <div className="token-grid">
-            {TOKENS.map((token) => (
+            {tokens.map((token) => (
               <article
                 key={token.symbol}
                 className={`token-card ${selectedTokenSymbol === token.symbol ? 'active' : ''}`}
@@ -293,7 +339,7 @@ function App() {
             <label>
               Token
               <select value={selectedTokenSymbol} onChange={(event) => setSelectedTokenSymbol(event.target.value)}>
-                {TOKENS.map((token) => (
+                {tokens.map((token) => (
                   <option key={token.symbol} value={token.symbol}>
                     {token.symbol}
                   </option>
@@ -341,6 +387,7 @@ function App() {
               <tr>
                 <th>Fecha</th>
                 <th>Importe</th>
+                <th>Red</th>
                 <th>Wallet envía</th>
                 <th>Wallet recibe</th>
                 <th>Hash</th>
@@ -349,7 +396,7 @@ function App() {
             <tbody>
               {history.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className="history-empty">
+                  <td colSpan="6" className="history-empty">
                     Aún no hay operaciones.
                   </td>
                 </tr>
@@ -357,11 +404,16 @@ function App() {
                 history.map((item) => (
                   <tr key={item.hash}>
                     <td>{new Date(item.date).toLocaleString()}</td>
-                    <td>{item.amount}</td>
+                    <td>{`${item.amount} ${item.token ?? ''}`.trim()}</td>
+                    <td>{SUPPORTED_CHAINS.find((chain) => chain.id === item.chainId)?.name ?? 'N/D'}</td>
                     <td>{shortAddress(item.from)}</td>
                     <td>{shortAddress(item.to)}</td>
                     <td>
-                      <a href={`https://bscscan.com/tx/${item.hash}`} target="_blank" rel="noreferrer">
+                      <a
+                        href={`${EXPLORER_BY_CHAIN[item.chainId] ?? EXPLORER_BY_CHAIN[DEFAULT_CHAIN.id]}${item.hash}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
                         {shortAddress(item.hash)}
                       </a>
                     </td>

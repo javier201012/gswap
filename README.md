@@ -1,13 +1,13 @@
 # gswap
 
-Frontend Web3 construido con Vite + React para Binance Smart Chain (BSC).
+Frontend Web3 construido con Vite + React para BSC, Polygon y Arbitrum.
 
 ## Funcionalidades
 
 - Conectar wallet Rabby (inyección EVM).
-- Forzar/cambiar a red BSC.
-- Consultar balances de BNB, USDT, USDC y BUSD.
-- Enviar BNB o tokens ERC20 desde la wallet conectada.
+- Cambiar de red entre BSC, Polygon y Arbitrum.
+- Consultar balances de tokens por red.
+- Enviar activo nativo o tokens ERC20 desde la wallet conectada.
 
 ## Uso
 

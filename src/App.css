@@ -90,6 +90,12 @@ h1 {
   padding: 0.85rem 1rem;
 }
 
+.chain-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .panel h2 {
   margin: 0 0 0.85rem;
   color: #eef2ff;
@@ -284,6 +290,11 @@ h1 {
 
 .secondary-button:hover {
   filter: brightness(1.07);
+}
+
+.secondary-button.chain-active {
+  border-color: rgba(117, 196, 250, 0.85);
+  box-shadow: 0 0 0 1px rgba(117, 196, 250, 0.35) inset;
 }
 
 .disconnect-button {

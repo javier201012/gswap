@@ -43,11 +43,18 @@ function shortAddress(address) {
 }
 
 function formatBalance(balance) {
+  if (balance === null || balance === undefined) return 'N/A'
   const numeric = Number(balance)
   if (!Number.isFinite(numeric)) return '0'
   if (numeric === 0) return '0'
   if (numeric < 0.0001) return '<0.0001'
   return numeric.toFixed(4)
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms)
+  })
 }
 
 function mergeTokens(defaultTokens, customTokens) {
@@ -221,15 +228,27 @@ function App() {
             continue
           }
 
-          const value = await publicClient.readContract({
-            address: token.address,
-            abi: erc20Abi,
-            functionName: 'balanceOf',
-            args: [nextAccount],
-          })
+          let value
+          try {
+            value = await publicClient.readContract({
+              address: token.address,
+              abi: erc20Abi,
+              functionName: 'balanceOf',
+              args: [nextAccount],
+            })
+          } catch {
+            await sleep(180)
+            value = await publicClient.readContract({
+              address: token.address,
+              abi: erc20Abi,
+              functionName: 'balanceOf',
+              args: [nextAccount],
+            })
+          }
+
           nextBalances[token.symbol] = formatUnits(value, token.decimals)
         } catch {
-          nextBalances[token.symbol] = '0'
+          nextBalances[token.symbol] = null
         }
       }
 

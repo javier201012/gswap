@@ -104,11 +104,14 @@ function App() {
   const [recipient, setRecipient] = useState('')
   const [amount, setAmount] = useState('')
   const [isSending, setIsSending] = useState(false)
+  const [isSwitchingChain, setIsSwitchingChain] = useState(false)
   const [isRefreshingBalances, setIsRefreshingBalances] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [history, setHistory] = useState([])
   const previousChainIdRef = useRef(chainId)
+  const chainIdRef = useRef(chainId)
+  const pendingSwitchChainIdRef = useRef(null)
 
   const tokens = useMemo(() => {
     const defaults = DEFAULT_TOKENS_BY_CHAIN[currentChain.id] ?? DEFAULT_TOKENS_BY_CHAIN[DEFAULT_CHAIN.id]
@@ -153,6 +156,15 @@ function App() {
     localStorage.setItem(CUSTOM_TOKENS_STORAGE_KEY, JSON.stringify(nextValue))
   }
 
+  async function waitForChainChange(targetChainId, timeoutMs = 14000) {
+    const startedAt = Date.now()
+    while (Date.now() - startedAt < timeoutMs) {
+      if (chainIdRef.current === targetChainId) return true
+      await sleep(300)
+    }
+    return false
+  }
+
   function removeCustomToken(tokenAddress) {
     const chainKey = String(currentChain.id)
     const currentCustom = customTokensByChain[chainKey] ?? []
@@ -173,10 +185,32 @@ function App() {
     try {
       const target = SUPPORTED_CHAINS.find((chain) => chain.id === targetChainId)
       if (!target) return
+      if (chainIdRef.current === targetChainId) {
+        setSuccess(`Ya estás en ${target.name}.`)
+        return
+      }
+
+      setIsSwitchingChain(true)
+      pendingSwitchChainIdRef.current = targetChainId
+
       await switchChainAsync({ chainId: targetChainId })
-      setSuccess(`Red cambiada a ${target.name}.`)
+
+      let switched = await waitForChainChange(targetChainId)
+      if (!switched && walletClient?.switchChain) {
+        await walletClient.switchChain({ id: targetChainId })
+        switched = await waitForChainChange(targetChainId)
+      }
+
+      if (switched) {
+        pendingSwitchChainIdRef.current = null
+        setSuccess(`Red cambiada a ${target.name}.`)
+      } else {
+        setError('No pude confirmar el cambio de red. Acepta en wallet y vuelve a la app.')
+      }
     } catch {
       setError('No se pudo cambiar de red desde la app.')
+    } finally {
+      setIsSwitchingChain(false)
     }
   }
 
@@ -409,6 +443,32 @@ function App() {
   }, [])
 
   useEffect(() => {
+    chainIdRef.current = chainId
+  }, [chainId])
+
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      const pendingTarget = pendingSwitchChainIdRef.current
+      if (!pendingTarget) return
+      if (document.visibilityState !== 'visible') return
+      if (chainIdRef.current === pendingTarget) {
+        pendingSwitchChainIdRef.current = null
+        return
+      }
+
+      try {
+        await switchChainAsync({ chainId: pendingTarget })
+      } catch {
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [switchChainAsync])
+
+  useEffect(() => {
     if (!chainId) return
 
     if (previousChainIdRef.current && previousChainIdRef.current !== chainId) {
@@ -486,9 +546,10 @@ function App() {
                 key={chain.id}
                 type="button"
                 className={`secondary-button ${chainId === chain.id ? 'chain-active' : ''}`}
+                disabled={isSwitchingChain}
                 onClick={() => switchToChain(chain.id)}
               >
-                {chain.name}
+                {isSwitchingChain && chain.id === pendingSwitchChainIdRef.current ? 'Cambiando...' : chain.name}
               </button>
             ))}
           </div>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
+import { useChainModal } from '@rainbow-me/rainbowkit'
 import { useAccount, useChainId, useConnections, useDisconnect, usePublicClient, useWalletClient } from 'wagmi'
 import { arbitrum, bsc, polygon } from 'wagmi/chains'
 import { erc20Abi, formatEther, formatUnits, isAddress, parseEther, parseUnits } from 'viem'
@@ -85,6 +86,7 @@ function mergeTokens(defaultTokens, customTokens) {
 
 function App() {
   const { address, isConnected } = useAccount()
+  const { openChainModal } = useChainModal()
   const connections = useConnections()
   const { disconnect } = useDisconnect()
   const chainId = useChainId()
@@ -464,6 +466,11 @@ function App() {
             </strong>
           </span>
         </div>
+        {isConnected ? (
+          <button type="button" className="secondary-button" onClick={openChainModal}>
+            Cambiar red
+          </button>
+        ) : null}
       </section>
 
       <section className="dashboard-grid">

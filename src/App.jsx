@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
-import { useChainModal } from '@rainbow-me/rainbowkit'
-import { useAccount, useChainId, useConnections, useDisconnect, usePublicClient, useWalletClient } from 'wagmi'
+import { useAccount, useChainId, useConnections, useDisconnect, usePublicClient, useSwitchChain, useWalletClient } from 'wagmi'
 import { arbitrum, bsc, polygon } from 'wagmi/chains'
 import { erc20Abi, formatEther, formatUnits, isAddress, parseEther, parseUnits } from 'viem'
 import './App.css'
@@ -86,9 +85,9 @@ function mergeTokens(defaultTokens, customTokens) {
 
 function App() {
   const { address, isConnected } = useAccount()
-  const { openChainModal } = useChainModal()
   const connections = useConnections()
   const { disconnect } = useDisconnect()
+  const { switchChainAsync } = useSwitchChain()
   const chainId = useChainId()
   const currentChain = useMemo(
     () => SUPPORTED_CHAINS.find((chain) => chain.id === chainId) ?? DEFAULT_CHAIN,
@@ -165,6 +164,20 @@ function App() {
 
     saveCustomTokens(nextCustomByChain)
     setSuccess('Token eliminado de la lista personalizada.')
+  }
+
+  async function switchToChain(targetChainId) {
+    setError('')
+    setSuccess('')
+
+    try {
+      const target = SUPPORTED_CHAINS.find((chain) => chain.id === targetChainId)
+      if (!target) return
+      await switchChainAsync({ chainId: targetChainId })
+      setSuccess(`Red cambiada a ${target.name}.`)
+    } catch {
+      setError('No se pudo cambiar de red desde la app.')
+    }
   }
 
   async function addCustomToken() {
@@ -467,9 +480,18 @@ function App() {
           </span>
         </div>
         {isConnected ? (
-          <button type="button" className="secondary-button" onClick={openChainModal}>
-            Cambiar red
-          </button>
+          <div className="chain-actions">
+            {SUPPORTED_CHAINS.map((chain) => (
+              <button
+                key={chain.id}
+                type="button"
+                className={`secondary-button ${chainId === chain.id ? 'chain-active' : ''}`}
+                onClick={() => switchToChain(chain.id)}
+              >
+                {chain.name}
+              </button>
+            ))}
+          </div>
         ) : null}
       </section>
 

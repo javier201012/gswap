@@ -2,7 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount, useChainId, useConnections, useDisconnect, usePublicClient, useSwitchChain, useWalletClient } from 'wagmi'
 import { arbitrum, bsc, polygon } from 'wagmi/chains'
-import { erc20Abi, formatEther, formatUnits, isAddress, parseEther, parseUnits } from 'viem'
+import {
+  decodeFunctionResult,
+  encodeFunctionData,
+  erc20Abi,
+  formatEther,
+  formatUnits,
+  isAddress,
+  parseEther,
+  parseUnits,
+} from 'viem'
 import './App.css'
 
 const HISTORY_STORAGE_KEY = 'gswap_tx_history'
@@ -294,7 +303,18 @@ function App() {
         try {
           const key = tokenKey(token)
           if (token.type === 'native') {
-            const value = await publicClient.getBalance({ address: nextAccount })
+            let value
+            try {
+              value = await publicClient.getBalance({ address: nextAccount })
+            } catch {
+              const balanceHex = await walletClient?.request({
+                method: 'eth_getBalance',
+                params: [nextAccount, 'latest'],
+              })
+              if (!balanceHex) throw new Error('wallet balance read failed')
+              value = BigInt(balanceHex)
+            }
+
             nextBalances[key] = formatEther(value)
             continue
           }
@@ -308,12 +328,23 @@ function App() {
               args: [nextAccount],
             })
           } catch {
-            await sleep(180)
-            value = await publicClient.readContract({
-              address: token.address,
+            const data = encodeFunctionData({
               abi: erc20Abi,
               functionName: 'balanceOf',
               args: [nextAccount],
+            })
+
+            const callResult = await walletClient?.request({
+              method: 'eth_call',
+              params: [{ to: token.address, data }, 'latest'],
+            })
+
+            if (!callResult) throw new Error('wallet eth_call failed')
+
+            value = decodeFunctionResult({
+              abi: erc20Abi,
+              functionName: 'balanceOf',
+              data: callResult,
             })
           }
 
@@ -488,6 +519,30 @@ function App() {
 
     refreshBalances(address)
   }, [address, isConnected, chainId, publicClient, currentChain.id])
+
+  useEffect(() => {
+    if (!isConnected || !address) return
+
+    const syncBalances = () => {
+      refreshBalances(address)
+    }
+
+    const intervalId = window.setInterval(syncBalances, 15000)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        syncBalances()
+      }
+    }
+
+    window.addEventListener('focus', syncBalances)
+    document.addEventListener('visibilitychange', handleVisibility)
+
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', syncBalances)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [address, isConnected, chainId, currentChain.id])
 
   useEffect(() => {
     if (!tokens.some((token) => tokenKey(token) === selectedTokenKey)) {
